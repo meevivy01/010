@@ -1,31 +1,32 @@
 name: JobThai Scraper Uni
 
-# กำหนดเวลาทำงาน
+# Schedule and manual trigger
 on:
-  workflow_dispatch:      # 1. ปุ่มกดรันเอง (Manual Run)
+  workflow_dispatch:       # Manual run button
   schedule:
-    - cron: '0 17 * * *'   # 2. รันอัตโนมัติทุกวันตอน 00:00 น. ประเทศไทย (UTC 17:00)
+    - cron: '0 17 * * *'   # Auto-run daily at 00:00 Thailand time (UTC 17:00)
 
 jobs:
   scrape_job:
-    runs-on: ubuntu-latest
+    # 🟢 ปรับเป็น 24.04 เพื่อให้รองรับ libasound2t64 ที่คุณเลือกใช้
+    runs-on: ubuntu-24.04 
     
-    # ตั้งค่า Timezone ให้เป็นประเทศไทย (สำคัญสำหรับการเช็ค Hot/New)
+    # Set Timezone to Thailand
     env:
       TZ: 'Asia/Bangkok'
 
     steps:
-      # 1. ดึงโค้ดล่าสุดจาก GitHub มาวางที่ Server
+      # 1. Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. ติดตั้ง Python
+      # 2. Set up Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      # 3. ติดตั้ง Google Chrome (เวอร์ชั่นล่าสุด)
+      # 3. Install Google Chrome
       - name: Install Google Chrome
         run: |
           wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
@@ -33,39 +34,36 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
 
-      # 4. ลง Library ตามไฟล์ requirements.txt
+      # 4. Install Xvfb and Dependencies (สำหรับ Ubuntu 24.04)
+      - name: Install Xvfb and Dependencies
+        run: |
+          sudo apt-get update
+          # libasound2t64 ถูกต้องแล้วสำหรับ Ubuntu 24.04
+          sudo apt-get install -y xvfb libnss3 libasound2t64 libgbm1 libu2f-udev fonts-liberation
+
+      # 5. Install Python libraries
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
-          
-      # 5. สร้างไฟล์ Config และ .env (ฉบับแก้ไข: ไม่ต้องยัด JSON ลงไฟล์ .env)
-      - name: Create Config & Env Files
+          python -m pip install --upgrade pip
+          pip install pandas undetected-chromedriver python-dotenv pyyaml rich thefuzz python-dateutil gspread oauth2client fake-useragent
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # 6. Create Config Files (เฉพาะไฟล์ YAML ที่จำเป็น)
+      # ❌ ตัดการสร้าง User.env ออก เพราะเราจะส่งผ่าน Env Vars ในขั้นตอน Run แทน (ปลอดภัยกว่า)
+      - name: Create Config Files
         env:
           DATA_COMP: ${{ secrets.COMPETITORS_DATA }}
           DATA_CLIENT: ${{ secrets.CLIENTS_DATA }}
           DATA_TIER1: ${{ secrets.TIER1_DATA }}
         run: |
-          # สร้างไฟล์ yaml (ใช้ตัวแปรเพื่อป้องกันอักขระพิเศษพัง)
           echo "$DATA_COMP" > compe.yaml
           echo "$DATA_CLIENT" > co.yaml
           echo "$DATA_TIER1" > tier1.yaml
-          
-        
-          
-          touch User.env
-          echo "JOBTHAI_USER=${{ secrets.JOBTHAI_USER }}" >> User.env
-          echo "JOBTHAI_PASS=${{ secrets.JOBTHAI_PASS }}" >> User.env
-          echo "EMAIL_SENDER=${{ secrets.EMAIL_SENDER }}" >> User.env
-          echo "EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}" >> User.env
-          echo "EMAIL_RECEIVER=${{ secrets.EMAIL_RECEIVER }}" >> User.env
-          
-          # ❌ ลบ 2 บรรทัดนี้ออกครับ (ตัวต้นเหตุปัญหา)
-          # echo "G_SHEET_KEY=..." >> User.env
-          # echo "G_SHEET_NAME=..." >> User.env
 
-      # 6. รันโค้ด Python
-      - name: Run Scraper
+      # 7. Run Scraper with Xvfb
+      - name: Run Scraper with Xvfb
         env:
+          # ส่งค่าเข้าโปรแกรมโดยตรง (Python จะอ่านผ่าน os.getenv ได้เลย)
           JOBTHAI_USER: ${{ secrets.JOBTHAI_USER }}
           JOBTHAI_PASS: ${{ secrets.JOBTHAI_PASS }}
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
@@ -73,21 +71,21 @@ jobs:
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
           COOKIES_JSON: ${{ secrets.COOKIES_JSON }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-          
-          # 🟢 เพิ่ม 2 บรรทัดนี้ (ส่งค่าไปให้ Python)
           G_SHEET_KEY: ${{ secrets.G_SHEET_KEY }}
           G_SHEET_NAME: ${{ secrets.G_SHEET_NAME }}
-          
-        run: python Git1.py
+        run: |
+          # 🟢 อย่าลืมเช็คชื่อไฟล์ว่าตรงกับใน Repo (Git1.py)
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python Git1.py
 
-      # 7. เก็บไฟล์ CSV และรูปภาพที่ได้ กลับมาให้เราดาวน์โหลด
+      # 8. Upload Results
       - name: Upload Results (CSV & Images)
-        if: always() # รันขั้นตอนนี้เสมอ แม้โปรแกรมจะ Error กลางทาง
+        if: always() 
         uses: actions/upload-artifact@v4
         with:
           name: scraper-results
           path: |
             *.csv
             resume_images/
-            *.png  
-          retention-days: 1
+            *.png
+            *.json
+          retention-days: 5 # เพิ่มวันเก็บไฟล์หน่อย เผื่อมาตรวจย้อนหลัง
