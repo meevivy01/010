@@ -281,75 +281,72 @@ class JobThaiRowScraper:
         except: return ""
 
     def step1_login(self):
-        # 🟢 ADVANCED STRATEGY: เข้า URL หน้า Login โดยตรง (ตัดขั้นตอนหน้าแรกทิ้ง)
-        # URL นี้คือหน้า Login สำหรับดู Resume โดยเฉพาะ
+        # 🟢 ADVANCED & STEALTH: เข้า URL ตรง + พิมพ์เนียนเหมือนคน
         target_login_url = "https://auth.jobthai.com/resumes/login?l=th"
         
+        # ฟังก์ชันพิมพ์ทีละตัว (เลียนแบบคน)
+        def type_like_human(element, text):
+            for char in text:
+                element.send_keys(char)
+                # สุ่มเวลาหน่วงระหว่างตัวอักษร (0.05 - 0.2 วินาที)
+                time.sleep(random.uniform(0.05, 0.2)) 
+
         max_retries = 3
         for attempt in range(1, max_retries + 1):
-            console.rule(f"[bold cyan]🔐 Login Attempt {attempt}/{max_retries} (Direct URL Mode)[/]")
+            console.rule(f"[bold cyan]🔐 Login Attempt {attempt}/{max_retries} (Stealth Mode)[/]")
             
             try:
-                # 1️⃣ STEP 1: บุกเข้าหน้า Login โดยตรง
-                console.print(f"   1️⃣  Direct Navigate ไปที่: [yellow]{target_login_url}[/]...", style="dim")
+                # 1. เข้า URL ตรง (เหมือนคนเปิด Bookmark)
+                console.print(f"   1️⃣  Navigate ไปที่หน้า Login...", style="dim")
                 self.driver.get(target_login_url)
                 self.wait_for_page_load()
-                
-                # Helper: ฆ่า Banner บังจอ
-                try:
-                    self.driver.execute_script("document.querySelectorAll('#close-button, .cookie-consent, [class*=\"pdpa\"], .modal-backdrop').forEach(b => b.remove());")
-                except: pass
+                self.random_sleep(2, 4) # รอให้เว็บโหลดเสร็จจริงๆ และเนียนว่าคนกำลังมองจอ
 
-                # 2️⃣ STEP 2: หาช่องกรอกด้วย Generic Selector (ไม่สน ID)
-                console.print("   2️⃣  กำลังหาช่องกรอกรหัส (Universal Selector)...", style="dim")
-                
+                # 2. หาช่องกรอก (Universal Selector)
                 try:
-                    # รอหาช่อง Password (ไม่สน ID ขอแค่เป็น type='password')
                     pass_elem = WebDriverWait(self.driver, 20).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='password']"))
                     )
-                    # หาช่อง User (มักจะเป็น type email หรือ text ที่อยู่ก่อน password)
                     user_elem = self.driver.find_element(By.CSS_SELECTOR, "input[type='email'], input[name*='user'], input[type='text']")
-                    
-                    console.print("      ✅ เจอช่อง User และ Password แล้ว!", style="green")
                 except:
-                    # ถ้าไม่เจอ อาจเป็นเพราะติด Iframe หรือยังโหลดไม่เสร็จ
-                    console.print("      ⚠️ ไม่เจอ Input ปกติ ลองเช็ค Iframe...", style="yellow")
-                    iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
-                    if iframes:
-                        self.driver.switch_to.frame(iframes[0])
-                        pass_elem = self.driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-                        user_elem = self.driver.find_element(By.CSS_SELECTOR, "input[type='email'], input[name*='user']")
-                    else:
-                        raise Exception("หาช่อง Input ไม่เจอจริงๆ (Check Page Source)")
+                    raise Exception("หาช่อง Input ไม่เจอ")
 
-                # 3️⃣ STEP 3: กรอกข้อมูล (ใช้ ActionChains พิมพ์ทีละตัวเหมือนคน)
-                console.print("   3️⃣  กำลังพิมพ์รหัส...", style="dim")
+                # 3. เริ่มกระบวนการพิมพ์ (Human Behavior)
+                console.print("   2️⃣  เริ่มพิมพ์รหัส (Human Typing)...", style="dim")
                 
-                # พิมพ์ User
-                user_elem.click()
+                # --- พิมพ์ Username ---
+                ActionChains(self.driver).move_to_element(user_elem).click().perform() # ขยับเมาส์ไปคลิก
+                time.sleep(random.uniform(0.5, 1.0))
                 user_elem.clear()
-                user_elem.send_keys(MY_USERNAME)
-                time.sleep(0.5)
+                type_like_human(user_elem, MY_USERNAME) # พิมพ์ทีละตัว
                 
-                # พิมพ์ Password
-                pass_elem.click()
-                pass_elem.clear()
-                pass_elem.send_keys(MY_PASSWORD)
-                time.sleep(1)
+                # เว้นช่วงสลับช่อง
+                time.sleep(random.uniform(0.5, 1.5))
 
-                # 4️⃣ STEP 4: กด Enter เพื่อ Login
-                console.print("   4️⃣  ส่งคำสั่ง Login...", style="dim")
+                # --- พิมพ์ Password ---
+                ActionChains(self.driver).move_to_element(pass_elem).click().perform()
+                pass_elem.clear()
+                type_like_human(pass_elem, MY_PASSWORD) # พิมพ์ทีละตัว
+                
+                # เว้นช่วงก่อนกด Enter (สำคัญมาก! ให้ React ประมวลผล)
+                time.sleep(random.uniform(1.0, 2.0))
+
+                # 4. กด Login
+                console.print("   3️⃣  กด Enter...", style="dim")
                 pass_elem.send_keys(Keys.ENTER)
                 
-                # แผนสำรอง: ถ้ากด Enter แล้วนิ่ง ให้หาปุ่มกดซ้ำ
-                time.sleep(2)
+                # แผนสำรอง: ถ้ากด Enter แล้วนิ่ง
+                time.sleep(3)
                 if "auth.jobthai.com" in self.driver.current_url:
-                    console.print("      ⚠️ Enter ไม่ไป -> พยายามคลิกปุ่ม Submit", style="yellow")
-                    self.driver.execute_script("document.querySelector('button[type=\"submit\"]').click()")
+                    console.print("      ⚠️ Enter ไม่ไป -> เลื่อนเมาส์ไปคลิกปุ่ม Submit", style="yellow")
+                    try:
+                        submit_btn = self.driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+                        ActionChains(self.driver).move_to_element(submit_btn).pause(0.5).click().perform()
+                    except:
+                        self.driver.execute_script("document.querySelector('button[type=\"submit\"]').click()")
 
-                # 5️⃣ STEP 5: ตรวจสอบผลลัพธ์
-                console.print("   5️⃣  รอผลลัพธ์...", style="dim")
+                # 5. ตรวจสอบผลลัพธ์
+                console.print("   4️⃣  รอ Redirect...", style="dim")
                 try:
                     WebDriverWait(self.driver, 20).until(
                         lambda d: "auth.jobthai.com" not in d.current_url and "login" not in d.current_url
@@ -357,20 +354,13 @@ class JobThaiRowScraper:
                     console.print(f"🎉 Login สำเร็จ! (Redirected to: {self.driver.current_url})", style="bold green")
                     return True
                 except:
-                    # เช็ค Error บนหน้าเว็บ
-                    err = ""
-                    try: err = self.driver.find_element(By.CSS_SELECTOR, ".text-danger, .error-message").text
-                    except: pass
-                    
-                    if err: raise Exception(f"Login Error from Web: {err}")
-                    else: raise Exception("Timeout waiting for redirect")
+                    raise Exception("Timeout: ยังติดอยู่ที่หน้า Login")
 
             except Exception as e:
                 console.print(f"[bold red]❌ Attempt {attempt} Failed: {e}[/]")
-                # ถ้าพัง ให้ Refresh แล้วลองใหม่
                 try: self.driver.refresh()
                 except: pass
-                time.sleep(3)
+                time.sleep(5)
 
         console.print("🚫 หมดความพยายาม -> ใช้ Cookie สำรอง", style="bold red")
         return self.login_with_cookie()
