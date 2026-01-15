@@ -100,6 +100,7 @@ TARGET_MAJORS = ["เครื่องสำอาง", "วิทยาศา�
 SEARCH_KEYWORDS = ["พะเยา เครื่องสำอาง","Cosmetic Phayao"]
 
 
+# --- 🟢 [เพิ่มใหม่] ส่วนตั้งค่าการวิเคราะห์ (Analysis Config) ---
 KEYWORDS_CONFIG = {
     "NPD": {"titles": ["NPD", "R&D", "RD", "Research", "Development", "วิจัย", "พัฒนา", "Formulation", "สูตร"]},
     "PCM": {"titles": ["PCM", "Production", "ผลิต", "Manufacturing", "Factory", "โรงงาน", "QA", "QC"]},
@@ -127,10 +128,11 @@ def analyze_row_department(row):
                 if keyword.lower() in text_val:
                     scores[dept] += 33
                     break 
-    if not scores: return pd.Series(["Uncategorized", 0, ""])
+    if not scores: return ["Uncategorized", 0, ""]
     sorted_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
     best_dept, max_score = sorted_scores[0]
-    return pd.Series([best_dept, int(min(max_score, 100)), ", ".join([f"{k}({v})" for k, v in sorted_scores if v > 0])])
+    breakdown = ", ".join([f"{k}({v})" for k, v in sorted_scores if v > 0])
+    return [best_dept, int(min(max_score, 100)), breakdown]
 
 class JobThaiRowScraper:
     def __init__(self):
@@ -728,12 +730,10 @@ class JobThaiRowScraper:
             except: self.random_sleep(5, 10)
 
         if not load_success: return None, 999, None
-        
-        try: self.human_scroll() 
-        except: pass
-        self.random_sleep(2.0, 5.0)
-        
-        data = {'Link': url}
+
+        self.random_sleep(2.0, 4.0) 
+        data = {}
+        data['Link'] = url 
         try: full_text = self.driver.find_element(By.CSS_SELECTOR, "#mainTableTwoColumn").text
         except: full_text = ""
         
@@ -743,16 +743,7 @@ class JobThaiRowScraper:
                 return elem.text.strip()
             except: return ""
 
-        edu_tables_xpath = '//*[@id="mainTableTwoColumn"]/tbody/tr/td[1]/table/tbody/tr[7]/td[2]/table'
-        try:
-            edu_tables = self.driver.find_elements(By.XPATH, edu_tables_xpath)
-            total_degrees = len(edu_tables)
-        except: total_degrees = 0
-        matched_uni = ""; matched_faculty = ""; matched_major = ""; is_qualified = False
-        highest_degree_text = "-"; max_degree_score = -1
-        degree_score_map = {"ปริญญาเอก": 3, "ดุษฎีบัณฑิต": 3, "Doctor": 3, "Ph.D": 3, "ปริญญาโท": 2, "มหาบัณฑิต": 2, "Master": 2, "ปริญญาตรี": 1, "บัณฑิต": 1, "Bachelor": 1}
-        
-        def check_fuzzy(scraped_text, target_list, threshold=85): # ลด Threshold
+        def check_fuzzy(scraped_text, target_list, threshold=85):
             if not target_list: return True
             if not scraped_text: return False
             best_score = 0
@@ -760,9 +751,17 @@ class JobThaiRowScraper:
                 score = fuzz.partial_ratio(target.lower(), scraped_text.lower())
                 if score > best_score: best_score = score
             if best_score >= threshold: return True
-            return False 
+            return False    
 
-        debug_edu_list = [] # เพิ่ม Debug
+        edu_tables_xpath = '//*[@id="mainTableTwoColumn"]/tbody/tr/td[1]/table/tbody/tr[7]/td[2]/table'
+        try:
+            edu_tables = self.driver.find_elements(By.XPATH, edu_tables_xpath)
+            total_degrees = len(edu_tables)
+        except: total_degrees = 0
+
+        matched_uni = ""; matched_faculty = ""; matched_major = ""; is_qualified = False
+        highest_degree_text = "-"; max_degree_score = -1
+        degree_score_map = {"ปริญญาเอก": 3, "ดุษฎีบัณฑิต": 3, "Doctor": 3, "Ph.D": 3, "ปริญญาโท": 2, "มหาบัณฑิต": 2, "Master": 2, "ปริญญาตรี": 1, "บัณฑิต": 1, "Bachelor": 1}
 
         for i in range(1, total_degrees + 1):
             base_xpath = f'//*[@id="mainTableTwoColumn"]/tbody/tr/td[1]/table/tbody/tr[7]/td[2]/table[{i}]'
@@ -774,14 +773,14 @@ class JobThaiRowScraper:
             
             curr_faculty = get_val(f'{base_xpath}//td[contains(., "คณะ")]/following-sibling::td[1]', True)
             curr_major = get_val(f'{base_xpath}//td[contains(., "สาขา")]/following-sibling::td[1]', True)
-            
-            debug_edu_list.append(f"[{curr_degree}] {curr_uni} / {curr_faculty} / {curr_major}")
 
             score = 0
             for key, val in degree_score_map.items():
                 if key in str(curr_degree): score = val; break
-            if score > max_degree_score: max_degree_score = score; highest_degree_text = curr_degree
-            elif score == max_degree_score and highest_degree_text == "-": highest_degree_text = curr_degree
+            if score > max_degree_score:
+                max_degree_score = score; highest_degree_text = curr_degree
+            elif score == max_degree_score and highest_degree_text == "-":
+                highest_degree_text = curr_degree
 
             if not is_qualified:
                 uni_pass = check_fuzzy(curr_uni, TARGET_UNIVERSITIES)
@@ -790,12 +789,10 @@ class JobThaiRowScraper:
                 if uni_pass and (fac_pass or major_pass):
                     is_qualified = True; matched_uni = curr_uni; matched_faculty = curr_faculty; matched_major = curr_major
 
-        if not is_qualified:
-            # เปิด Debug เพื่อดูว่าทำไมไม่ผ่าน (ถ้าต้องการ)
-            # printer.print(f"   ❄️ (Skip) {debug_edu_list}", style="dim")
-            return None, 999, None
-        
-        data['ระดับการศึกษา'] = highest_degree_text; data['มหาลัย'] = matched_uni; data['คณะ'] = matched_faculty; data['สาขา'] = matched_major
+        if not is_qualified: return None, 999, None
+
+        data['ระดับการศึกษา'] = highest_degree_text 
+        data['มหาลัย'] = matched_uni; data['คณะ'] = matched_faculty; data['สาขา'] = matched_major
         data['รหัสใบสมัคร'] = get_val("#ResumeViewDiv [align='left'] span.white")
         
         try:
@@ -808,7 +805,6 @@ class JobThaiRowScraper:
         except: data['รูปภาพ'] = ""
 
         raw_update_date = get_val('//*[@id="ResumeViewDiv"]/table/tbody/tr[2]/td[3]/span[2]', xpath=True)
-        
         def calculate_last_update(date_str):
             if not date_str: return "-"
             try:
@@ -829,7 +825,6 @@ class JobThaiRowScraper:
                 if not txt: return "วันนี้"
                 return " ".join(txt)
             except: return "-"
-            
         data['อัพเดทล่าสุด'] = calculate_last_update(raw_update_date)
 
         data['ชื่อ'] = get_val("#mainTableTwoColumn td > span.head1")
@@ -842,16 +837,21 @@ class JobThaiRowScraper:
         data['ที่อยู่'] = get_val("#mainTableTwoColumn div:nth-of-type(1) span.head1")
         data['จังหวัดที่อยู่'] = get_val("#mainTableTwoColumn table [width][align='left'] div span.headNormal")
         
+        # แยกตำแหน่ง 1-3
         pos1 = get_val('//*[@id="mainTableTwoColumn"]/tbody/tr/td[1]/table/tbody/tr[5]/td[2]/table/tbody/tr[3]/td/span[2]', xpath=True)
         pos2 = get_val('//*[@id="mainTableTwoColumn"]/tbody/tr/td[1]/table/tbody/tr[5]/td[2]/table/tbody/tr[3]/td/span[4]', xpath=True)
         pos3 = get_val('//*[@id="mainTableTwoColumn"]/tbody/tr/td[1]/table/tbody/tr[5]/td[2]/table/tbody/tr[3]/td/span[6]', xpath=True)
-        data['ตำแหน่งที่ต้องการสมัคร_1'] = pos1; data['ตำแหน่งที่ต้องการสมัคร_2'] = pos2; data['ตำแหน่งที่ต้องการสมัคร_3'] = pos3
+        data['ตำแหน่งที่ต้องการสมัคร_1'] = pos1
+        data['ตำแหน่งที่ต้องการสมัคร_2'] = pos2
+        data['ตำแหน่งที่ต้องการสมัคร_3'] = pos3
         combined_positions = ", ".join([p for p in [pos1, pos2, pos3] if p])
+
         data['เงินเดือนที่ต้องการ'] = get_val("//td[contains(., 'เงินเดือนที่ต้องการ')]/following-sibling::td[1]", True)
         
+        # คำนวณเงินเดือนสำหรับ Email
+        raw_salary = data.get('เงินเดือนที่ต้องการ', '')
         salary_min_txt = "-"
         salary_max_txt = "-"
-        raw_salary = data.get('เงินเดือนที่ต้องการ', '')
         try:
             if raw_salary and 'ปิดข้อมูล' not in str(raw_salary):
                 s = str(raw_salary).lower().replace(',', '')
@@ -861,15 +861,15 @@ class JobThaiRowScraper:
                 if nums:
                     mn, mx = nums[0], nums[0]
                     if len(nums) >= 2: mn, mx = nums[0], nums[1]
-                    if mx > 1000 and mn < 1000 and mn > 0: mn *= 1000
+                    if mx > 1000 and mn < 1000 and mn > 0:
+                        if mx / mn > 100: mn *= 1000
                     salary_min_txt = f"{int(mn):,}"
                     salary_max_txt = f"{int(mx):,}"
         except: pass
-        
-        data['Salary_Min'] = salary_min_txt
-        data['Salary_Max'] = salary_max_txt
 
-        all_work_history = []
+        printer.print(f"   🔥 เจอ: {highest_degree_text} | มหาลัย: {matched_uni} | อัพเดท: {data.get('อัพเดทล่าสุด')}", style="bold green")
+
+        all_work_history = [] 
         try:
             if "ประวัติการทำงาน/ฝึกงาน" in full_text:
                 history_text = full_text.split("ประวัติการทำงาน/ฝึกงาน")[1].split("ความสามารถ")[0]
@@ -880,28 +880,62 @@ class JobThaiRowScraper:
             if len(raw_chunks) > 1:
                 for k in range(1, len(raw_chunks), 2):
                     if k+1 < len(raw_chunks): jobs.append(raw_chunks[k] + raw_chunks[k+1]) 
+            
             i = 0
             while True:
                 check_xpath = f'//*[@id="mainTableTwoColumn"]/tbody/tr/td[2]/table/tbody/tr[2]/td[2]/table[{i+1}]'
                 try:
                     if len(self.driver.find_elements(By.XPATH, check_xpath)) == 0: break
                 except: break
+
                 suffix = f"_{i+1}"
-                company = get_val(f'{check_xpath}/tbody/tr[3]/td/div/span', True)
-                if not company: company = get_val(f'{check_xpath}/tbody/tr[3]/td', True)
+                
+                xpath_level = f'//*[@id="mainTableTwoColumn"]/tbody/tr/td[2]/table/tbody/tr[2]/td[2]/table[{i+1}]/tbody/tr[7]/td[2]/span'
+                data[f'ระดับหน้าที่รับผิดชอบ{suffix}'] = get_val(xpath_level, xpath=True)
+                
+                xpath_duration = f'//*[@id="mainTableTwoColumn"]/tbody/tr/td[2]/table/tbody/tr[2]/td[2]/table[{i+1}]/tbody/tr[2]/td/div'
+                duration_str = get_val(xpath_duration, xpath=True)
+                data[f'ระยะเวลาที่ทำงาน{suffix}'] = duration_str
+                data[f'รวมอายุงาน{suffix}'] = self.calculate_duration_text(duration_str)
+
+                xpath_duties_1 = f'//*[@id="mainTableTwoColumn"]/tbody/tr/td[2]/table/tbody/tr[2]/td[2]/table[{i+1}]/tbody/tr[8]/td/div/span'
+                data[f'หน้าที่รับผิดชอบ{suffix}'] = get_val(xpath_duties_1, xpath=True)
+
+                comp_xpath_specific = f'//*[@id="mainTableTwoColumn"]/tbody/tr/td[2]/table/tbody/tr[2]/td[2]/table[{i+1}]/tbody/tr[3]/td/div/span'
+                company = get_val(comp_xpath_specific, xpath=True)
+                if not company:
+                    company_xpath_2 = f'//*[@id="mainTableTwoColumn"]/tbody/tr/td[2]/table/tbody/tr[2]/td[2]/table[{i+1}]/tbody/tr[3]/td'
+                    company = get_val(company_xpath_2, xpath=True)
+                
+                position = ""; salary = ""
                 if i < len(jobs):
                     block = jobs[i]
                     if not company:
                         comp_match = re.search(r"^.*(บริษัท|Ltd|Inc|Group|Organization|หจก|Limited).*$", block, re.MULTILINE | re.IGNORECASE)
                         company = comp_match.group(0).strip() if comp_match else ""
+                        if not company:
+                             lines = [l.strip() for l in block.split('\n') if l.strip()]
+                             if len(lines) > 1: company = lines[1]
+                    pos_match = re.search(r"ตำแหน่ง\s+(.*)", block)
+                    sal_match = re.search(r"เงินเดือน\s+(.*)", block)
+                    position = pos_match.group(1).strip() if pos_match else ""
+                    salary = sal_match.group(1).strip() if sal_match else ""
+
                 data[f'ชื่อบริษัทที่เคยทำงาน{suffix}'] = company
-                if company: all_work_history.append(company.strip())
+                data[f'ตำแหน่งที่เคยเป็น{suffix}'] = position
+                data[f'เงินเดือนที่เคยได้{suffix}'] = salary
+
+                if company:
+                    clean_name = company.strip()
+                    if clean_name and clean_name not in all_work_history:
+                        all_work_history.append(clean_name)
                 i += 1
         except: pass
-        
-        competitor_str = ", ".join(all_work_history)
-        data['เคยทำบริษัทคู่แข่ง'] = competitor_str
 
+        if all_work_history: competitor_str = ", ".join(all_work_history)
+        else: competitor_str = "-"
+        data['เคยทำบริษัทคู่แข่ง'] = competitor_str
+            
         today_date = datetime.date.today()
         update_date = self.parse_thai_date_exact(raw_update_date)
         days_diff = 999
@@ -911,21 +945,20 @@ class JobThaiRowScraper:
         full_name = f"{data.get('ชื่อ', '')} {data.get('นามสกุล', '')}"
         
         person_data = {
+            "image_path": data.get('รูปภาพ', '')
             "keyword": keyword, 
             "company": competitor_str,
             "degree": highest_degree_text,
-            "salary_min": salary_min_txt,
-            "salary_max": salary_max_txt,
+            "salary_min": salary_min_txt, # ใช้ค่าที่คำนวณแล้ว
+            "salary_max": salary_max_txt, # ใช้ค่าที่คำนวณแล้ว
             "id": app_id,
             "name": full_name,
             "age": data.get('อายุ', '-'),
-            "positions": combined_positions, 
-            "last_update": data['อัพเดทล่าสุด'],
+            "positions": combined_positions, # ใช้ตำแหน่งรวม
+            "last_update": data.get('อัพเดทล่าสุด', '-'), 
             "link": url,
-            "image_path": data.get('รูปภาพ', '')
         }
 
-        printer.print(f"   🔥 เจอ: {highest_degree_text} | มหาลัย: {matched_uni} | วันที่: {days_diff} วันก่อน", style="bold green")
         return data, days_diff, person_data
     
     # ... (ส่วน send_single_email, send_batch_email, save_to_google_sheets คงเดิม) ...
@@ -1055,7 +1088,7 @@ class JobThaiRowScraper:
             console.print("⚠️ ไม่มีข้อมูลใหม่ให้บันทึก", style="yellow")
             return
 
-        console.rule("[bold green]📊 เริ่มต้นการอัพโหลดขึ้น Google Sheets[/]")
+        console.rule("[bold green]📊 เริ่มต้นการอัพโหลดขึ้น Google Sheets (Enhanced Mode)[/]")
         
         try:
             if not G_SHEET_KEY_JSON or not G_SHEET_NAME:
@@ -1070,50 +1103,119 @@ class JobThaiRowScraper:
             sheet = client.open(G_SHEET_NAME)
             console.print(f"✅ เชื่อมต่อไฟล์ '{G_SHEET_NAME}' สำเร็จ", style="success")
             
+            processed_data = []
+            for item in self.all_scraped_data:
+                row_data = item.copy() 
+                
+                # 1. วิเคราะห์คะแนน (Analysis)
+                try:
+                    analysis_result = analyze_row_department(row_data)
+                    row_data['Analyzed_Department'] = analysis_result[0]
+                    row_data['Analyzed_Score'] = analysis_result[1]
+                    row_data['Analyzed_Breakdown'] = analysis_result[2]
+                except: pass
+
+                # 2. แยกเงินเดือน (Min/Max)
+                def clean_salary_split(val):
+                    if pd.isna(val) or str(val).strip() == '' or 'ปิดข้อมูล' in str(val): return None, None
+                    s = str(val).lower().replace(',', '')
+                    s = re.sub(r'(\d+(\.\d+)?)\s*k', lambda m: str(float(m.group(1)) * 1000), s)
+                    nums = re.findall(r'\d+(?:\.\d+)?', s)
+                    nums = [float(n) for n in nums]
+                    if not nums: return None, None
+                    mn, mx = nums[0], nums[0]
+                    if len(nums) >= 2: mn, mx = nums[0], nums[1]
+                    if mx > 1000 and mn < 1000 and mn > 0:
+                        if mx / mn > 100: mn *= 1000
+                    return int(mn), int(mx)
+
+                sal_min, sal_max = clean_salary_split(row_data.get('เงินเดือนที่ต้องการ', ''))
+                row_data['เงินเดือนที่ต้องการ_Min'] = sal_min
+                row_data['เงินเดือนที่ต้องการ_Max'] = sal_max
+
+                # 3. คลีนเบอร์โทร & Email
+                row_data['เบอร์โทร'] = re.sub(r'\D', '', str(row_data.get('เบอร์โทร', '')))
+                row_data['Email'] = str(row_data.get('Email', '')).replace('Click', '').strip()
+
+                # 4. แยกที่อยู่ (แขวง/เขต/จังหวัด/รหัสปณ)
+                raw_addr = str(row_data.get('ที่อยู่', '')).replace('จ.', 'จังหวัด').replace('อ.', 'อำเภอ').replace('ต.', 'ตำบล')
+                m_sub = re.search(r'(แขวง|ตำบล)\s*([ก-๙]+)', raw_addr)
+                row_data['แขวง'] = m_sub.group(2) if m_sub else ""
+                m_dist = re.search(r'(เขต|อำเภอ)\s*([ก-๙]+)', raw_addr)
+                row_data['เขต'] = m_dist.group(2) if m_dist else ""
+                
+                raw_prov = str(row_data.get('จังหวัดที่อยู่', '')).strip()
+                m_zip = re.search(r'(\d{5})$', raw_prov)
+                if m_zip:
+                    row_data['รหัสไปรษณีย์'] = m_zip.group(1)
+                    row_data['จังหวัดที่อยู่'] = raw_prov.replace(m_zip.group(1), '').strip()
+                else:
+                    row_data['รหัสไปรษณีย์'] = ""
+
+                # 5. คลีนชื่อบริษัท (ลบช่องว่างแปลกๆ)
+                def clean_company_name(val):
+                    if not val: return ""
+                    s = str(val).strip()
+                    s = re.sub(r'(?<=[\u0E00-\u0E7F])\s+(?=[\u0E00-\u0E7F])', '', s)
+                    return s
+                
+                for k in list(row_data.keys()):
+                    if 'ชื่อบริษัทที่เคยทำงาน' in k:
+                        row_data[k] = clean_company_name(row_data[k])
+
+                processed_data.append(row_data)
+
+            # --- จัดเรียง Columns ---
+            all_keys = set()
+            for d in processed_data: all_keys.update(d.keys())
+            
+            base_columns = [
+                "Link", "Keyword", "รหัสใบสมัคร", "เคยทำบริษัทคู่แข่ง", "รูปภาพ", 
+                "อัพเดทล่าสุด", 
+                "ชื่อ", "นามสกุล", "อายุ", "เพศ", 
+                "เบอร์โทร", "Email", "ที่อยู่", "แขวง", "เขต", "จังหวัดที่อยู่", "รหัสไปรษณีย์",
+                "ตำแหน่งที่ต้องการสมัคร_1","ตำแหน่งที่ต้องการสมัคร_2","ตำแหน่งที่ต้องการสมัคร_3", 
+                "เงินเดือนที่ต้องการ", "เงินเดือนที่ต้องการ_Min", "เงินเดือนที่ต้องการ_Max", 
+                "ระดับการศึกษา", "มหาลัย", "คณะ", "สาขา"
+            ]
+            
+            work_cols = []
+            keywords_work = ["ชื่อบริษัทที่เคยทำงาน", "ตำแหน่งที่เคยเป็น", "เงินเดือนที่เคยได้", "ระดับหน้าที่รับผิดชอบ", "ระยะเวลาที่ทำงาน", "หน้าที่รับผิดชอบ", "รวมอายุงาน"]
+            for k in all_keys:
+                if any(kw in k for kw in keywords_work):
+                    work_cols.append(k)
+            
+            def sort_key(x):
+                m = re.search(r'_(\d+)$', x)
+                num = int(m.group(1)) if m else 0
+                return (num, x) 
+            work_cols.sort(key=sort_key)
+
+            analysis_cols = ["Analyzed_Department", "Analyzed_Score", "Analyzed_Breakdown"]
+
+            final_headers = base_columns + work_cols + analysis_cols
+            
             today_str = datetime.datetime.now().strftime("%d-%m-%Y")
             try:
                 worksheet = sheet.worksheet(today_str)
                 console.print(f"ℹ️ พบ Tab '{today_str}' อยู่แล้ว -> จะทำการต่อท้ายข้อมูล (Append)", style="info")
             except:
-                worksheet = sheet.add_worksheet(title=today_str, rows="100", cols="20")
+                worksheet = sheet.add_worksheet(title=today_str, rows="100", cols=str(len(final_headers)))
                 console.print(f"🆕 สร้าง Tab ใหม่: '{today_str}'", style="success")
-                
-                headers = [
-                    "Link", "Keyword", "รหัสใบสมัคร", "ชื่อ-นามสกุล", "อายุ", "เพศ", 
-                    "เบอร์โทร", "Email", "ที่อยู่", "ระดับการศึกษา", "มหาลัย", "คณะ", "สาขา",
-                    "ตำแหน่งที่สมัคร", "เงินเดือนที่ขอ (Raw)", "เงินเดือนต่ำสุด", "เงินเดือนสูงสุด",
-                    "เคยทำบริษัทคู่แข่ง", "อัพเดทล่าสุด"
-                ]
-                worksheet.append_row(headers)
+                worksheet.append_row(final_headers)
 
-            data_rows = []
-            for item in self.all_scraped_data:
-                row = [
-                    item.get('Link', ''),
-                    item.get('Keyword', ''),
-                    item.get('รหัสใบสมัคร', ''),
-                    f"{item.get('ชื่อ','')} {item.get('นามสกุล','')}",
-                    item.get('อายุ', ''),
-                    item.get('เพศ', ''),
-                    re.sub(r'\D', '', str(item.get('เบอร์โทร', ''))),
-                    str(item.get('Email', '')).replace('Click', '').strip(),
-                    item.get('จังหวัดที่อยู่', ''),
-                    item.get('ระดับการศึกษา', ''),
-                    item.get('มหาลัย', ''),
-                    item.get('คณะ', ''),
-                    item.get('สาขา', ''),
-                    f"{item.get('ตำแหน่งที่ต้องการสมัคร_1','')} {item.get('ตำแหน่งที่ต้องการสมัคร_2','')}",
-                    item.get('เงินเดือนที่ต้องการ', ''),
-                    item.get('Salary_Min', '-'), 
-                    item.get('Salary_Max', '-'), 
-                    item.get('เคยทำบริษัทคู่แข่ง', ''),
-                    item.get('อัพเดทล่าสุด', '')
-                ]
-                data_rows.append(row)
+            rows_to_upload = []
+            for p_data in processed_data:
+                row = []
+                for header in final_headers:
+                    val = p_data.get(header, "")
+                    if val is None: val = ""
+                    row.append(str(val))
+                rows_to_upload.append(row)
             
-            if data_rows:
-                worksheet.append_rows(data_rows)
-                console.print(f"✅ บันทึกข้อมูล {len(data_rows)} แถว เรียบร้อย!", style="bold green")
+            if rows_to_upload:
+                worksheet.append_rows(rows_to_upload)
+                console.print(f"✅ บันทึกข้อมูล {len(rows_to_upload)} แถว ลง Google Sheet เรียบร้อย!", style="bold green")
                 
         except Exception as e:
             console.print(f"❌ Google Sheets Error: {e}", style="error")
