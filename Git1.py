@@ -387,97 +387,87 @@ class JobThaiRowScraper:
                     raise Exception("หาปุ่ม 'หาคน' ไม่เจอ หรือกดไม่ได้")
 
                 # ==============================================================================
-                # 4️⃣ STEP 4: กรอกข้อมูล & กดปุ่ม #login_company (ตัด Refresh ออก)
+                # 4️⃣ STEP 4: กรอกข้อมูลและใช้ "3 ท่าไม้ตาย" (Combo Breaker)
                 # ==============================================================================
-                console.print("   4️⃣  กำลังกรอกข้อมูลและกดปุ่ม #login_company...", style="dim")
+                console.print("   4️⃣  กำลังกรอกข้อมูลและพยายาม Login (Combo Mode)...", style="dim")
                 kill_blockers()
 
-                # รอให้ปุ่มโหลด (แต่ไม่ Refresh แล้วถ้าไม่เจอ)
+                # 1. รอช่อง Password และกรอกข้อมูลด้วย React Hack
                 try:
-                    WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "#login_company"))
+                    pass_field = WebDriverWait(self.driver, 15).until(
+                        EC.element_to_be_clickable((By.ID, "login-form-password"))
                     )
+                    # ใช้ JS กรอกค่า (ชัวร์สุดสำหรับ React ป้องกันการกรอกแล้วว่างเปล่า)
+                    self.driver.execute_script("""
+                        var u = document.getElementById('login-form-username');
+                        var p = document.getElementById('login-form-password');
+                        function setNativeValue(element, value) {
+                            if (!element) return;
+                            var lastValue = element.value;
+                            element.value = value;
+                            var event = new Event('input', { bubbles: true });
+                            var tracker = element._valueTracker;
+                            if (tracker) { tracker.setValue(lastValue); }
+                            element.dispatchEvent(event);
+                            element.dispatchEvent(new Event('change', { bubbles: true }));
+                            element.dispatchEvent(new Event('blur', { bubbles: true }));
+                        }
+                        if(u && p) {
+                            setNativeValue(u, arguments[0]);
+                            setNativeValue(p, arguments[1]);
+                        }
+                    """, MY_USERNAME, MY_PASSWORD)
+                    time.sleep(1) # รอให้ State ของเว็บอัพเดท
                 except:
-                    console.print("      ⚠️ รอ 10 วิแล้วปุ่ม #login_company ยังไม่มา (จะใช้ JS querySelector กดเลย)", style="yellow")
+                    console.print("      ⚠️ หาช่องกรอกไม่เจอ", style="yellow")
 
-                js_fill_and_click = """
-                    var user = document.getElementById('login-form-username');
-                    var pass = document.getElementById('login-form-password');
-                    var filled = false;
-
-                    // --- Part A: กรอกข้อมูล (React Event Hack) ---
-                    function setNativeValue(element, value) {
-                        if (!element) return false;
-                        var lastValue = element.value;
-                        element.value = value;
-                        var event = new Event('input', { bubbles: true });
-                        var tracker = element._valueTracker;
-                        if (tracker) { tracker.setValue(lastValue); }
-                        element.dispatchEvent(event);
-                        element.dispatchEvent(new Event('change', { bubbles: true }));
-                        element.dispatchEvent(new Event('blur', { bubbles: true }));
-                        return true;
-                    }
-
-                    if (user && pass) {
-                        setNativeValue(user, arguments[0]);
-                        setNativeValue(pass, arguments[1]);
-                        filled = true;
-                    } else {
-                        // Fallback
-                        var inputs = document.getElementsByTagName('input');
-                        for(var i=0; i<inputs.length; i++) {
-                             if(inputs[i].type == 'text' || inputs[i].type == 'email') setNativeValue(inputs[i], arguments[0]);
-                             if(inputs[i].type == 'password') setNativeValue(inputs[i], arguments[1]);
-                        }
-                        filled = true;
-                    }
-
-                    // --- Part B: กดปุ่ม (Target: #login_company) ---
-                    var clicked = false;
-                    var method = "none";
-                    
-                    // 1. ใช้ querySelector ตามคำสั่ง
-                    var targetBtn = document.querySelector("#login_company");
-                    if (targetBtn) {
-                        targetBtn.click();
-                        clicked = true;
-                        method = "#login_company";
-                    } 
-                    // 2. Fallback: เผื่อหาไม่เจอ ลองหาปุ่มที่มีคำว่า "เข้าสู่ระบบ"
-                    else {
-                        var btns = document.querySelectorAll('button');
-                        for (var i=0; i<btns.length; i++) {
-                            var txt = (btns[i].innerText || '').toLowerCase();
-                            if (btns[i].type === 'submit' || txt.includes('เข้าสู่ระบบ') || txt.includes('login')) {
-                                btns[i].click();
-                                clicked = true;
-                                method = "generic_match";
-                                break;
-                            }
-                        }
-                    }
-
-                    return { filled: filled, clicked: clicked, method: method };
-                """
+                # --- เริ่มมหกรรมกด Login (เช็ค URL ทุกครั้งหลังกด) ---
                 
-                result = self.driver.execute_script(js_fill_and_click, MY_USERNAME, MY_PASSWORD)
+                # Helper Function: เช็คว่า Login ผ่านหรือยัง (ถ้า URL เปลี่ยน แสดงว่าผ่าน)
+                def is_still_login_page(driver):
+                    curr = driver.current_url.lower()
+                    return "auth.jobthai.com" in curr or "login" in curr
+
+                # 🥊 ท่าที่ 1: Focus Password + ENTER (เนียนที่สุด เว็บชอบ)
+                if is_still_login_page(self.driver):
+                    try:
+                        console.print("      👉 ท่าที่ 1: Focus & Enter...", style="dim")
+                        pass_field.click()
+                        time.sleep(0.5)
+                        pass_field.send_keys(Keys.ENTER)
+                        time.sleep(3) # ให้เวลาโหลด
+                    except: pass
+
+                # 🥊 ท่าที่ 2: Move Mouse & Click (กระตุ้นปุ่มให้ตื่น)
+                if is_still_login_page(self.driver):
+                    try:
+                        console.print("      👉 ท่าที่ 2: Move Mouse & Click Button...", style="yellow")
+                        # หาปุ่ม Submit อะไรก็ได้
+                        submit_btn = self.driver.find_element(By.CSS_SELECTOR, "#login_company, button[type='submit'], .ant-btn-primary")
+                        
+                        # ขยับเมาส์ไปหาปุ่ม (เพื่อให้เว็บรู้ว่าเป็นคน)
+                        actions = ActionChains(self.driver)
+                        actions.move_to_element(submit_btn).pause(0.5).click().perform()
+                        time.sleep(3)
+                    except: pass
+
+                # 🥊 ท่าที่ 3: JS Force Click (ไม้ตายสุดท้าย บังคับกด)
+                if is_still_login_page(self.driver):
+                    try:
+                        console.print("      👉 ท่าที่ 3: JS Force Click (Hard Reset)...", style="red")
+                        self.driver.execute_script("""
+                            var btn = document.querySelector("#login_company") || document.querySelector("button[type='submit']");
+                            if (btn) btn.click();
+                        """)
+                        time.sleep(3)
+                    except: pass
                 
-                if result and result.get('filled'):
-                    if result.get('clicked'):
-                        method_used = result.get('method')
-                        msg_style = "green" if method_used == "#login_company" else "yellow"
-                        console.print(f"      ✅ กรอกรหัสและกดปุ่มสำเร็จ! (Method: {method_used})", style=msg_style)
-                    else:
-                        console.print("      ⚠️ หาปุ่มไม่เจอ -> Focus ช่องรหัสแล้วกด Enter", style="yellow")
-                        try:
-                            pass_elem = self.driver.find_element(By.ID, "login-form-password")
-                            pass_elem.click() 
-                            pass_elem.send_keys(Keys.ENTER)
-                        except:
-                            ActionChains(self.driver).send_keys(Keys.ENTER).perform()
-                else:
-                    raise Exception("หาช่อง Input ไม่เจอ")
+                # 🥊 ท่าแถม: Submit Form ตรงๆ (ถ้าปุ่มพัง)
+                if is_still_login_page(self.driver):
+                    try:
+                        self.driver.execute_script("document.querySelector('form')?.dispatchEvent(new Event('submit', {cancelable: true, bubbles: true}));")
+                        time.sleep(2)
+                    except: pass
 
                 # ==============================================================================
                 # 5️⃣ STEP 5: ตรวจสอบผลลัพธ์
