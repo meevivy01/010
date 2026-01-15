@@ -945,7 +945,7 @@ class JobThaiRowScraper:
         full_name = f"{data.get('ชื่อ', '')} {data.get('นามสกุล', '')}"
         
         person_data = {
-            "image_path": data.get('รูปภาพ', '')
+            "image_path": data.get('รูปภาพ', ''),
             "keyword": keyword, 
             "company": competitor_str,
             "degree": highest_degree_text,
@@ -956,7 +956,7 @@ class JobThaiRowScraper:
             "age": data.get('อายุ', '-'),
             "positions": combined_positions, # ใช้ตำแหน่งรวม
             "last_update": data.get('อัพเดทล่าสุด', '-'), 
-            "link": url,
+            "link": url
         }
 
         return data, days_diff, person_data
