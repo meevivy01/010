@@ -965,19 +965,26 @@ class JobThaiRowScraper:
         app_id = data.get('รหัสใบสมัคร', '').strip()
         full_name = f"{data.get('ชื่อ', '')} {data.get('นามสกุล', '')}"
         
+        # 🟢 [เพิ่ม] เช็คว่า ID นี้เคยเจอในประวัติไหม
+        last_seen_str = "-"
+        if hasattr(self, 'last_seen_db') and app_id in self.last_seen_db:
+            last_seen_str = self.last_seen_db[app_id]
+
+        # 🟢 [แก้ไข] เพิ่ม last_seen_date เข้าไปใน person_data
         person_data = {
             "image_path": data.get('รูปภาพ', ''),
             "keyword": keyword, 
             "company": competitor_str,
             "degree": highest_degree_text,
-            "salary_min": salary_min_txt, # ใช้ค่าที่คำนวณแล้ว
-            "salary_max": salary_max_txt, # ใช้ค่าที่คำนวณแล้ว
+            "salary_min": salary_min_txt, 
+            "salary_max": salary_max_txt, 
             "id": app_id,
             "name": full_name,
             "age": data.get('อายุ', '-'),
-            "positions": combined_positions, # ใช้ตำแหน่งรวม
+            "positions": combined_positions, 
             "last_update": data.get('อัพเดทล่าสุด', '-'), 
-            "link": url
+            "link": url,
+            "last_seen_date": last_seen_str  # <--- เพิ่ม Key นี้ครับ
         }
 
         return data, days_diff, person_data
@@ -998,6 +1005,7 @@ class JobThaiRowScraper:
         elif len(people_list) > 1: subject = f"🔥 {subject_prefix} ({len(people_list)} คน)"
         else: subject = subject_prefix 
 
+        # 🟢 [แก้ไข HTML Header] เพิ่ม <th>วันที่เคยเจอ</th> แทรกเข้าไป
         body_html = f"""
         <html>
         <head>
@@ -1025,7 +1033,7 @@ class JobThaiRowScraper:
             <table>
                 <tr>
                     <th style="width: 10%;">รูปภาพ</th>
-                    <th style="width: 15%;">{col_header}</th>
+                    <th style="width: 10%;">วันที่เคยเจอ</th> <th style="width: 15%;">{col_header}</th>
                     <th style="width: 10%;">ระดับการศึกษาสูงสุด</th>
                     <th style="width: 10%;">รหัสใบสมัคร</th>
                     <th style="width: 15%;">ชื่อ-นามสกุล</th>
@@ -1052,10 +1060,15 @@ class JobThaiRowScraper:
             else:
                 company_style = "font-weight: normal;"
 
+            # 🟢 [เพิ่ม] Logic สีวันที่ (ถ้าเคยเจอให้เป็นสีส้ม, ถ้าใหม่ให้เป็นสีเทา)
+            prev_date = person.get('last_seen_date', '-')
+            date_style = "color: #e67e22; font-weight: bold;" if prev_date != "-" else "color: #999;"
+
+            # 🟢 [แก้ไข HTML Row] เพิ่ม <td>{prev_date}</td> ให้ตรงกับ Header
             body_html += f"""
                 <tr>
                     <td style="text-align: center;">{img_html}</td>
-                    <td style="{company_style}">{company_display}</td>
+                    <td style="{date_style}">{prev_date}</td> <td style="{company_style}">{company_display}</td>
                     <td>{person.get('degree', '-')}</td> 
                     <td>{person['id']}</td>
                     <td>{person['name']}</td>
@@ -1103,6 +1116,51 @@ class JobThaiRowScraper:
 
     def send_batch_email(self, batch_candidates, keyword):
         self.send_single_email(f"สรุปผู้สมัครรายสัปดาห์: {keyword} ({len(batch_candidates)} คน)", batch_candidates)
+
+
+    def load_last_seen_from_gsheet(self):
+        console.print("[dim]📥 กำลังโหลดประวัติการเจอจาก Google Sheets (ย้อนหลัง 7 วัน)...[/]")
+        last_seen_map = {} 
+        try:
+            if not G_SHEET_KEY_JSON or not G_SHEET_NAME: return {}
+            
+            creds_dict = json.loads(G_SHEET_KEY_JSON)
+            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            client = gspread.authorize(creds)
+            sheet = client.open(G_SHEET_NAME)
+            
+            all_ws = sheet.worksheets()
+            today_str = datetime.datetime.now().strftime("%d-%m-%Y")
+            
+            # ดูย้อนหลังเฉพาะ Tab ที่ไม่ใช่วันนี้
+            target_ws = [ws for ws in all_ws if ws.title != today_str]
+            target_ws.reverse() # ดูอันใหม่ก่อน
+            
+            check_limit = 365 # เช็คแค่ 7 วันย้อนหลังพอ (กันช้า)
+            count = 0
+            
+            for ws in target_ws:
+                if count >= check_limit: break
+                try:
+                    # สมมติว่า ID อยู่คอลัมน์ C (index 3)
+                    ids = ws.col_values(3) 
+                    date_found = ws.title 
+                    
+                    for pid in ids:
+                        pid = str(pid).strip()
+                        if pid and pid not in last_seen_map and pid != "รหัสใบสมัคร":
+                            last_seen_map[pid] = date_found
+                    count += 1
+                except: pass
+                
+            console.print(f"[success]✅ โหลดประวัติเก่าเสร็จสิ้น (จำข้อมูล {len(last_seen_map)} คน)[/]")
+            return last_seen_map
+            
+        except Exception as e:
+            console.print(f"[yellow]⚠️ โหลดประวัติเก่าไม่ได้: {e}[/]")
+            return {}
+            
 
     def save_to_google_sheets(self):
         if not self.all_scraped_data:
@@ -1241,9 +1299,15 @@ class JobThaiRowScraper:
         except Exception as e:
             console.print(f"❌ Google Sheets Error: {e}", style="error")
 
+
+    
+
     def run(self):
         self.email_report_list = []
         if not self.step1_login(): return
+
+        # 🟢 [เพิ่ม] บรรทัดนี้ครับ: สั่งให้โหลดข้อมูลเก่ามาเก็บไว้
+        self.last_seen_db = self.load_last_seen_from_gsheet()
         
         today = datetime.date.today()
         is_monday = (today.weekday() == 0)
