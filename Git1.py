@@ -736,6 +736,11 @@ class JobThaiRowScraper:
         console.print(f"[bold green]📦 สรุปยอดรวม: {len(collected_links)} ลิงก์[/]")
         return collected_links
 
+    # 🟢 CODE แก้ไขใหม่ (วางทับฟังก์ชันเดิมใน Git1.py)
+# สิ่งที่แก้:
+# 1. เปลี่ยนวิธีหา 'อัพเดทล่าสุด' จาก XPath ตายตัว เป็น Regex หาแพทเทิร์นวันที่
+# 2. เพิ่ม comma (,) ที่หายไปใน person_data
+
     def scrape_detail_from_json(self, url, keyword, progress_console=None):
         printer = progress_console if progress_console else console
         self.set_random_user_agent()
@@ -825,9 +830,19 @@ class JobThaiRowScraper:
             data['รูปภาพ'] = save_path
         except: data['รูปภาพ'] = ""
 
-        raw_update_date = get_val('//*[@id="ResumeViewDiv"]/table/tbody/tr[2]/td[3]/span[2]', xpath=True)
+        # 🟢 [UPDATED] ใช้ Regex ค้นหาวันที่จากข้อความทั้งหน้า (แทน XPath ที่ไม่เสถียร)
+        thai_months_regex = "มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม"
+        match_date = re.search(fr"(\d{{1,2}})\s+({thai_months_regex})\s+(\d{{4}})", full_text)
+        
+        raw_update_date = "-"
+        if match_date:
+            raw_update_date = f"{match_date.group(1)} {match_date.group(2)} {match_date.group(3)}"
+        else:
+            # Fallback
+            raw_update_date = get_val('//span[contains(text(), "แก้ไขล่าสุด") or contains(text(), "Last Update")]/following-sibling::span', xpath=True)
+
         def calculate_last_update(date_str):
-            if not date_str: return "-"
+            if not date_str or date_str == "-": return "-"
             try:
                 parts = date_str.split()
                 if len(parts) < 3: return "-"
@@ -965,12 +980,12 @@ class JobThaiRowScraper:
         app_id = data.get('รหัสใบสมัคร', '').strip()
         full_name = f"{data.get('ชื่อ', '')} {data.get('นามสกุล', '')}"
         
-        # 🟢 [เพิ่ม] เช็คว่า ID นี้เคยเจอในประวัติไหม
+        # เช็คประวัติ
         last_seen_str = "-"
         if hasattr(self, 'last_seen_db') and app_id in self.last_seen_db:
             last_seen_str = self.last_seen_db[app_id]
 
-        # 🟢 [แก้ไข] เพิ่ม last_seen_date เข้าไปใน person_data
+        # 🟢 [UPDATED] เพิ่ม comma (,) หลัง image_path เพื่อแก้ Syntax Error
         person_data = {
             "image_path": data.get('รูปภาพ', ''),
             "keyword": keyword, 
@@ -984,7 +999,7 @@ class JobThaiRowScraper:
             "positions": combined_positions, 
             "last_update": data.get('อัพเดทล่าสุด', '-'), 
             "link": url,
-            "last_seen_date": last_seen_str  # <--- เพิ่ม Key นี้ครับ
+            "last_seen_date": last_seen_str
         }
 
         return data, days_diff, person_data
