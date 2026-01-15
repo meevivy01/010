@@ -309,7 +309,7 @@ class JobThaiRowScraper:
                 try:
                     self.driver.get(start_url)
                     self.wait_for_page_load()
-                    self.random_sleep(3, 4)
+                    self.random_sleep(4, 6)
                     kill_blockers()
                     console.print(f"      ✅ เข้าหน้าเว็บสำเร็จ (Title: {self.driver.title})", style="green")
                 except Exception as e:
@@ -333,9 +333,9 @@ class JobThaiRowScraper:
                         console.print(f"      ✅ เจอปุ่มเป้าหมายแล้ว! (กด Tab ครั้งที่ {i+1})", style="bold green")
                         actions.send_keys(Keys.ENTER).perform()
                         link_found = True
-                        time.sleep(3) # รอ Modal เด้ง
+                        time.sleep(5) # รอ Modal เด้ง
                         break
-                    time.sleep(0.05)
+                    time.sleep(0.07)
 
                 if not link_found:
                     console.print("      ⚠️ กด Tab ไม่เจอ (จะลองใช้ JS กดแทน)", style="yellow")
@@ -359,7 +359,7 @@ class JobThaiRowScraper:
                 kill_blockers()
                 
                 try:
-                    WebDriverWait(self.driver, 10).until(
+                    WebDriverWait(self.driver, 15).until(
                         EC.visibility_of_element_located((By.XPATH, "//*[@id='login_tab_employer']"))
                     )
                 except: 
@@ -379,7 +379,7 @@ class JobThaiRowScraper:
                             self.driver.execute_script("arguments[0].click();", elem)
                             clicked_tab = True
                             console.print(f"      ✅ กดปุ่ม 'หาคน' สำเร็จ (ด้วย Selector: {val})", style="bold green")
-                            time.sleep(2)
+                            time.sleep(4)
                             break
                     except: continue
                 
