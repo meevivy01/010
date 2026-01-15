@@ -387,118 +387,79 @@ class JobThaiRowScraper:
                     raise Exception("หาปุ่ม 'หาคน' ไม่เจอ หรือกดไม่ได้")
 
                 # ==============================================================================
-                # 4️⃣ STEP 4: กรอกข้อมูล & กดปุ่ม (Aggressive Search)
+                # 4️⃣ STEP 4: กรอกข้อมูลและใช้ "3 ท่าไม้ตาย" (Combo Breaker)
                 # ==============================================================================
-                console.print("   4️⃣  กำลังกรอกข้อมูลและกวาดหาปุ่ม Submit ทุกวิถีทาง...", style="dim")
+                console.print("   4️⃣  กำลังกรอกข้อมูลและพยายาม Login (3 Methods)...", style="dim")
                 kill_blockers()
 
-                # รอให้ปุ่มโหลด (รอปุ่ม submit ใดๆ ก็ได้ ไม่จำกัดแค่ ID)
+                # 1. รอช่อง Password และกรอกข้อมูล
                 try:
-                    WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "button[type='submit'], #login_company, .ant-btn-primary"))
+                    pass_field = WebDriverWait(self.driver, 15).until(
+                        EC.element_to_be_clickable((By.ID, "login-form-password"))
                     )
+                    # ใช้ JS กรอกค่า (ชัวร์สุดสำหรับ React)
+                    self.driver.execute_script("""
+                        var u = document.getElementById('login-form-username');
+                        var p = document.getElementById('login-form-password');
+                        function setNativeValue(element, value) {
+                            var lastValue = element.value;
+                            element.value = value;
+                            var event = new Event('input', { bubbles: true });
+                            var tracker = element._valueTracker;
+                            if (tracker) { tracker.setValue(lastValue); }
+                            element.dispatchEvent(event);
+                            element.dispatchEvent(new Event('change', { bubbles: true }));
+                            element.dispatchEvent(new Event('blur', { bubbles: true }));
+                        }
+                        if(u && p) {
+                            setNativeValue(u, arguments[0]);
+                            setNativeValue(p, arguments[1]);
+                        }
+                    """, MY_USERNAME, MY_PASSWORD)
+                    time.sleep(1) # รอให้ State อัพเดท
                 except:
-                    console.print("      ⚠️ รอ 10 วิแล้วยังไม่เจอปุ่มชัดเจน (จะใช้ JS ไล่หา)", style="yellow")
+                    console.print("      ⚠️ หาช่องกรอกไม่เจอ", style="yellow")
 
-                js_fill_and_click = """
-                    var user = document.getElementById('login-form-username');
-                    var pass = document.getElementById('login-form-password');
-                    var filled = false;
-
-                    // --- Part A: กรอกข้อมูล (React Event Hack) ---
-                    function setNativeValue(element, value) {
-                        if (!element) return false;
-                        var lastValue = element.value;
-                        element.value = value;
-                        var event = new Event('input', { bubbles: true });
-                        var tracker = element._valueTracker;
-                        if (tracker) { tracker.setValue(lastValue); }
-                        element.dispatchEvent(event);
-                        element.dispatchEvent(new Event('change', { bubbles: true }));
-                        element.dispatchEvent(new Event('blur', { bubbles: true }));
-                        return true;
-                    }
-
-                    if (user && pass) {
-                        setNativeValue(user, arguments[0]);
-                        setNativeValue(pass, arguments[1]);
-                        filled = true;
-                    } else {
-                        // Fallback
-                        var inputs = document.getElementsByTagName('input');
-                        for(var i=0; i<inputs.length; i++) {
-                             if(inputs[i].type == 'text' || inputs[i].type == 'email') setNativeValue(inputs[i], arguments[0]);
-                             if(inputs[i].type == 'password') setNativeValue(inputs[i], arguments[1]);
-                        }
-                        filled = true;
-                    }
-
-                    // --- Part B: กวาดหาปุ่ม Submit (Aggressive) ---
-                    var clicked = false;
-                    var method = "none";
-                    
-                    var targetBtn = null;
-
-                    // 1. ลอง ID ก่อน
-                    if (!targetBtn) targetBtn = document.querySelector("#login_company");
-                    if (targetBtn) method = "#login_company";
-
-                    // 2. ลองปุ่มที่มี class 'ant-btn-primary' (ปุ่มสีหลักของ JobThai)
-                    if (!targetBtn) {
-                        var primBtns = document.querySelectorAll(".ant-btn-primary");
-                        for(var b of primBtns) {
-                            if(b.innerText.includes("เข้าสู่ระบบ") || b.innerText.includes("Login")) {
-                                targetBtn = b; method = "class_ant_primary"; break;
-                            }
-                        }
-                    }
-
-                    // 3. ลองปุ่ม type=submit
-                    if (!targetBtn) {
-                        targetBtn = document.querySelector("button[type='submit']");
-                        if(targetBtn) method = "type_submit";
-                    }
-
-                    // 4. วนหา Text ตรงๆ
-                    if (!targetBtn) {
-                        var btns = document.querySelectorAll('button');
-                        for (var i=0; i<btns.length; i++) {
-                            var txt = (btns[i].innerText || '').toLowerCase();
-                            if (txt.includes('เข้าสู่ระบบ') || txt.includes('login')) {
-                                targetBtn = btns[i];
-                                method = "text_match";
-                                break;
-                            }
-                        }
-                    }
-
-                    if (targetBtn) {
-                        targetBtn.click();
-                        clicked = true;
-                    }
-
-                    return { filled: filled, clicked: clicked, method: method };
-                """
+                # --- เริ่มมหกรรมกด Login (เช็ค URL ทุกครั้งหลังกด) ---
                 
-                result = self.driver.execute_script(js_fill_and_click, MY_USERNAME, MY_PASSWORD)
+                # Helper เช็คความสำเร็จ
+                def is_login_success(driver):
+                    curr = driver.current_url.lower()
+                    return "auth.jobthai.com" not in curr and "login" not in curr
+
+                # ท่าที่ 1: Focus Password + ENTER (เนียนที่สุด)
+                if not is_login_success(self.driver):
+                    try:
+                        console.print("      🥊 ท่าที่ 1: กด ENTER...", style="dim")
+                        pass_field.click()
+                        pass_field.send_keys(Keys.ENTER)
+                        time.sleep(3) # ให้เวลาโหลด
+                    except: pass
+
+                # ท่าที่ 2: Click ปุ่ม Submit (ถ้า Enter ไม่ไป)
+                if not is_login_success(self.driver):
+                    try:
+                        console.print("      🥊 ท่าที่ 2: คลิกปุ่ม Submit...", style="yellow")
+                        submit_btn = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+                        # ขยับเมาส์ไปกระตุ้นปุ่มก่อน
+                        ActionChains(self.driver).move_to_element(submit_btn).click().perform()
+                        time.sleep(3)
+                    except: pass
+
+                # ท่าที่ 3: JS Force Click (ไม้ตายสุดท้าย)
+                if not is_login_success(self.driver):
+                    try:
+                        console.print("      🥊 ท่าที่ 3: JS Force Click...", style="red")
+                        self.driver.execute_script("document.querySelector('button[type=submit]').click();")
+                        time.sleep(3)
+                    except: pass
                 
-                if result and result.get('filled'):
-                    if result.get('clicked'):
-                        method_used = result.get('method')
-                        console.print(f"      ✅ กรอกรหัสและกดปุ่มสำเร็จ! (Method: {method_used})", style="green")
-                    else:
-                        console.print("      ⚠️ หาปุ่มไม่เจอ -> Focus ช่องรหัสแล้วกด Enter (Last Resort)", style="yellow")
-                        try:
-                            # ลองหา Form แล้ว Submit ตรงๆ
-                            self.driver.execute_script("document.querySelector('form')?.dispatchEvent(new Event('submit', {cancelable: true, bubbles: true}));")
-                            
-                            pass_elem = self.driver.find_element(By.ID, "login-form-password")
-                            pass_elem.click() 
-                            pass_elem.send_keys(Keys.ENTER)
-                        except:
-                            ActionChains(self.driver).send_keys(Keys.ENTER).perform()
-                else:
-                    raise Exception("หาช่อง Input ไม่เจอ")
+                # แถม: ถ้ายังไม่ออก ลอง Submit Form ตรงๆ
+                if not is_login_success(self.driver):
+                    try:
+                        self.driver.execute_script("document.querySelector('form').dispatchEvent(new Event('submit', {cancelable: true, bubbles: true}));")
+                        time.sleep(2)
+                    except: pass
 
                 # ==============================================================================
                 # 5️⃣ STEP 5: ตรวจสอบผลลัพธ์
