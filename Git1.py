@@ -387,18 +387,18 @@ class JobThaiRowScraper:
                     raise Exception("หาปุ่ม 'หาคน' ไม่เจอ หรือกดไม่ได้")
 
                 # ==============================================================================
-                # 4️⃣ STEP 4: กรอกข้อมูล & กดปุ่ม #login_company (ตัด Refresh ออก)
+                # 4️⃣ STEP 4: กรอกข้อมูล & กดปุ่ม (Aggressive Search)
                 # ==============================================================================
-                console.print("   4️⃣  กำลังกรอกข้อมูลและกดปุ่ม #login_company...", style="dim")
+                console.print("   4️⃣  กำลังกรอกข้อมูลและกวาดหาปุ่ม Submit ทุกวิถีทาง...", style="dim")
                 kill_blockers()
 
-                # รอให้ปุ่มโหลด (แต่ไม่ Refresh แล้วถ้าไม่เจอ)
+                # รอให้ปุ่มโหลด (รอปุ่ม submit ใดๆ ก็ได้ ไม่จำกัดแค่ ID)
                 try:
                     WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "#login_company"))
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "button[type='submit'], #login_company, .ant-btn-primary"))
                     )
                 except:
-                    console.print("      ⚠️ รอ 10 วิแล้วปุ่ม #login_company ยังไม่มา (จะใช้ JS querySelector กดเลย)", style="yellow")
+                    console.print("      ⚠️ รอ 10 วิแล้วยังไม่เจอปุ่มชัดเจน (จะใช้ JS ไล่หา)", style="yellow")
 
                 js_fill_and_click = """
                     var user = document.getElementById('login-form-username');
@@ -433,29 +433,48 @@ class JobThaiRowScraper:
                         filled = true;
                     }
 
-                    // --- Part B: กดปุ่ม (Target: #login_company) ---
+                    // --- Part B: กวาดหาปุ่ม Submit (Aggressive) ---
                     var clicked = false;
                     var method = "none";
                     
-                    // 1. ใช้ querySelector ตามคำสั่ง
-                    var targetBtn = document.querySelector("#login_company");
-                    if (targetBtn) {
-                        targetBtn.click();
-                        clicked = true;
-                        method = "#login_company";
-                    } 
-                    // 2. Fallback: เผื่อหาไม่เจอ ลองหาปุ่มที่มีคำว่า "เข้าสู่ระบบ"
-                    else {
+                    var targetBtn = null;
+
+                    // 1. ลอง ID ก่อน
+                    if (!targetBtn) targetBtn = document.querySelector("#login_company");
+                    if (targetBtn) method = "#login_company";
+
+                    // 2. ลองปุ่มที่มี class 'ant-btn-primary' (ปุ่มสีหลักของ JobThai)
+                    if (!targetBtn) {
+                        var primBtns = document.querySelectorAll(".ant-btn-primary");
+                        for(var b of primBtns) {
+                            if(b.innerText.includes("เข้าสู่ระบบ") || b.innerText.includes("Login")) {
+                                targetBtn = b; method = "class_ant_primary"; break;
+                            }
+                        }
+                    }
+
+                    // 3. ลองปุ่ม type=submit
+                    if (!targetBtn) {
+                        targetBtn = document.querySelector("button[type='submit']");
+                        if(targetBtn) method = "type_submit";
+                    }
+
+                    // 4. วนหา Text ตรงๆ
+                    if (!targetBtn) {
                         var btns = document.querySelectorAll('button');
                         for (var i=0; i<btns.length; i++) {
                             var txt = (btns[i].innerText || '').toLowerCase();
-                            if (btns[i].type === 'submit' || txt.includes('เข้าสู่ระบบ') || txt.includes('login')) {
-                                btns[i].click();
-                                clicked = true;
-                                method = "generic_match";
+                            if (txt.includes('เข้าสู่ระบบ') || txt.includes('login')) {
+                                targetBtn = btns[i];
+                                method = "text_match";
                                 break;
                             }
                         }
+                    }
+
+                    if (targetBtn) {
+                        targetBtn.click();
+                        clicked = true;
                     }
 
                     return { filled: filled, clicked: clicked, method: method };
@@ -466,11 +485,13 @@ class JobThaiRowScraper:
                 if result and result.get('filled'):
                     if result.get('clicked'):
                         method_used = result.get('method')
-                        msg_style = "green" if method_used == "#login_company" else "yellow"
-                        console.print(f"      ✅ กรอกรหัสและกดปุ่มสำเร็จ! (Method: {method_used})", style=msg_style)
+                        console.print(f"      ✅ กรอกรหัสและกดปุ่มสำเร็จ! (Method: {method_used})", style="green")
                     else:
-                        console.print("      ⚠️ หาปุ่มไม่เจอ -> Focus ช่องรหัสแล้วกด Enter", style="yellow")
+                        console.print("      ⚠️ หาปุ่มไม่เจอ -> Focus ช่องรหัสแล้วกด Enter (Last Resort)", style="yellow")
                         try:
+                            # ลองหา Form แล้ว Submit ตรงๆ
+                            self.driver.execute_script("document.querySelector('form')?.dispatchEvent(new Event('submit', {cancelable: true, bubbles: true}));")
+                            
                             pass_elem = self.driver.find_element(By.ID, "login-form-password")
                             pass_elem.click() 
                             pass_elem.send_keys(Keys.ENTER)
